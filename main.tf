@@ -115,7 +115,7 @@ trap 'exec 2>&4 1>&3' 0 1 2 3
 exec 1>/home/azureuser/log.out 2>&1
 apt-get update
 apt-get install -y nfs-kernel-server libmunge-dev munge openmpi-bin openmpi-common libopenmpi-dev libdbus-1-dev
-apt-get install -y openssl libssl-dev libpam-dev numactl hwloc lua5.4 libreadline-dev rrdtool libncurses-dev man2html libibmad-dev libibumad-dev bzip2 build-essential dnsutils
+apt-get install -y openssl libssl-dev libpam-dev numactl hwloc lua5.4 libreadline-dev rrdtool libncurses-dev man2html libibmad-dev libibumad-dev bzip2 build-essential dnsutils bc
 mkdir -p /nfs/mpi
 chown -R nobody:nogroup /nfs/
 chmod -R 777 /nfs/
@@ -276,7 +276,7 @@ trap 'exec 2>&4 1>&3' 0 1 2 3
 exec 1>/home/azureuser/log.out 2>&1
 apt-get update
 apt-get install -y nfs-kernel-server libmunge-dev munge openmpi-bin openmpi-common libopenmpi-dev libdbus-1-dev
-apt-get install -y openssl libssl-dev libpam-dev numactl hwloc lua5.4 libreadline-dev rrdtool libncurses-dev man2html libibmad-dev libibumad-dev bzip2 build-essential dnsutils
+apt-get install -y openssl libssl-dev libpam-dev numactl hwloc lua5.4 libreadline-dev rrdtool libncurses-dev man2html libibmad-dev libibumad-dev bzip2 build-essential dnsutils bc
 # Configure Munge
 mkdir -p /etc/munge
 echo "welcometoslurmamazonuserwelcometoslurmamazonuserwelcometoslurmamazonuser" | tee /etc/munge/munge.key
