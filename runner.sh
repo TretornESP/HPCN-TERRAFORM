@@ -3,7 +3,6 @@ export ARM_CLIENT_ID="changeme"
 export ARM_CLIENT_SECRET="changeme"
 export ARM_SUBSCRIPTION_ID="changeme"
 export ARM_TENANT_ID="changeme"
-export RSA_PASSPHRASE="changeme"
 
 password=$(openssl rand -base64 32)
 echo "Save this password: $password, we will ask it again"
@@ -20,3 +19,4 @@ source /etc/profile.d/slurm.sh
 /home/azureuser/exec.sh
 EOF
 scp -i ~/.ssh/id_rsa azureuser@$(terraform output -raw head_public_ip_address):/nfs/mpi/reports/$datetime/report.txt ./report.txt
+cat report.txt
