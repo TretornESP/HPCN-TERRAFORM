@@ -1,0 +1,6 @@
+*.swp
+*.lock
+*.log
+*.log.*
+*.out
+*.txt
