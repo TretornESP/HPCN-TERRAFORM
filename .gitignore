@@ -4,3 +4,11 @@
 *.log.*
 *.out
 *.txt
+.*
+!/.gitignore
+terraform.tfstate
+terraform.tfstate.backup
+terraform.tfvars
+terraform.tfvars.json
+*.tfstate
+*.tfstate.backup

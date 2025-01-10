@@ -3,6 +3,7 @@ export ARM_CLIENT_ID="changeme"
 export ARM_CLIENT_SECRET="changeme"
 export ARM_SUBSCRIPTION_ID="changeme"
 export ARM_TENANT_ID="changeme"
+export RSA_PASSPHRASE="changeme"
 
 password=$(openssl rand -base64 32)
 echo "Save this password: $password, we will ask it again"
