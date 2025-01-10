@@ -2,6 +2,12 @@
 
 Este fichero ejecuta los test NPB en infraestructura de Azure mediante Terraform.
 
+## Estructura de ficheros
+
+- `runner.sh`: Script que ejecuta los comandos de terraform y los test NPB. Por defecto instala terraform y genera la clave ssh.
+- `main.tf`: Fichero de configuración de terraform. Crea una red virtual, un grupo de seguridad, N máquinas virtuales y un disco compartido NFS, instala mange y slurm. Ademas comienza a ejecutar el test general.
+- `reports`: Ficheros de resultados en bruto usados en la práctica.
+
 ## Requisitos
 
 Una cuenta de Azure con permisos para crear recursos y la cloud shell habilitada.
@@ -31,13 +37,28 @@ ARM_TENANT_ID => tenant
 3. Ejecutar el script `runner.sh` para crear la infraestructura.
 Por seguridad nos pedira que introduzcamos 3 veces la clave ssh
 
-4. Para ejecuciones posteriores podemos comentar las lineas del runner para hacerlo idempotente.
-```bash
-#terraform init
-#ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N $password 
-```
+4. Para ejecuciones posteriores podemos comentar las lineas señaladas del runner.sh
 
 5. A mayores del output en general, nos creara un fichero report.txt en la carpeta actual
+
+6. Para entrar en modo interactivo al nodo head ejecutamos:
+
+```bash
+ssh -i ~/.ssh/id_rsa azureuser@$(terraform output -raw head_public_ip_address)
+```
+
+7. Si entramos en modo interactivo antes del startup, debemos cargar el path con los binarios de slurm mediante el comando
+
+```bash
+source /etc/profile.d/slurm.sh
+```
+
+8. Para ejecutar las pruebas NPB, ejecutamos el comando
+
+```bash
+/home/azureuser/exec.sh
+#Podemos comentar las lineas de ejecucion de los test que no queramos!
+```
 
 ## TODO
 

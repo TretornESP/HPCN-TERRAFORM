@@ -13,3 +13,4 @@ terraform.tfvars.json
 *.tfstate
 *.tfstate.backup
 ran.sh
+passsword.txt

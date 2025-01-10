@@ -12,8 +12,23 @@ variable "worker_vm_hostname" {
   default = "worker"
 }
 
+variable "worker_count" {
+  type    = number
+  default = 4
+}
+
+variable "head_instance" {
+  type    = string
+  default = "Standard_B2s"
+}
+
+variable "worker_instance" {
+  type    = string
+  default = "Standard_B2s"
+}
+
 resource "azurerm_resource_group" "main" {
-  name     = "HPC-Cluster"
+  name     = "HPC-Cluster-beta"
   location = "East US"
 }
 
@@ -67,10 +82,12 @@ resource "azurerm_public_ip" "head" {
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   allocation_method   = "Dynamic"
+  sku                 = "Basic"
 }
 
 resource "azurerm_network_interface" "worker" {
-  name                = "worker-nic"
+  count               = var.worker_count
+  name                = "worker-nic-${count.index}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
 
@@ -85,7 +102,7 @@ resource "azurerm_linux_virtual_machine" "head" {
   name                = "head"
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
-  size                = "Standard_B1s"
+  size                = var.head_instance
   admin_username      = "azureuser"
   network_interface_ids = [
     azurerm_network_interface.head.id,
@@ -243,14 +260,13 @@ EOT
 }
 
 resource "azurerm_linux_virtual_machine" "worker" {
-  name                = "worker"
-  resource_group_name = azurerm_resource_group.main.name
-  location            = azurerm_resource_group.main.location
-  size                = "Standard_B1s"
-  admin_username      = "azureuser"
-  network_interface_ids = [
-    azurerm_network_interface.worker.id,
-  ]
+  count                 = var.worker_count
+  name                  = "${var.worker_vm_hostname}-${count.index}"
+  resource_group_name   = azurerm_resource_group.main.name
+  location              = azurerm_resource_group.main.location
+  size                  = var.worker_instance
+  admin_username        = "azureuser"
+  network_interface_ids = [element(azurerm_network_interface.worker.*.id, count.index)]
 
   admin_ssh_key {
     username   = "azureuser"
@@ -306,12 +322,12 @@ echo "Headnode started"
 # Set environment variables
 echo 'export SLURM_HOME=/nfs/slurm' | tee /etc/profile.d/slurm.sh
 echo 'export SLURM_CONF=$SLURM_HOME/etc/slurm.conf' | tee -a /etc/profile.d/slurm.sh
-echo 'export SLURM_NODENAME=${var.worker_vm_hostname}' | tee -a /etc/profile.d/slurm.sh
+echo 'export SLURM_NODENAME=${var.worker_vm_hostname}-${count.index}' | tee -a /etc/profile.d/slurm.sh
 echo 'export PATH=/nfs/slurm/bin:$PATH' | tee -a /etc/profile.d/slurm.sh
 
 mkdir -p /var/spool/slurm
 chmod 777 /var/spool/slurm
-sed "s|@SLURM_NODENAME@|${var.worker_vm_hostname}|" $SLURM_HOME/etc/slurm/slurmd.service > /lib/systemd/system/slurmd.service
+sed "s|@SLURM_NODENAME@|${var.worker_vm_hostname}-${count.index}|" $SLURM_HOME/etc/slurm/slurmd.service > /lib/systemd/system/slurmd.service
 systemctl restart munge.service
 systemctl enable slurmd.service
 systemctl start slurmd.service
@@ -327,8 +343,4 @@ output "head_public_ip_address" {
 
 output "head_private_ip_address" {
   value = azurerm_network_interface.head.private_ip_address
-}
-
-output "worker_private_ip_address" {
-  value = azurerm_network_interface.worker.private_ip_address
 }
