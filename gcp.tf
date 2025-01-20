@@ -1,19 +1,7 @@
-terraform {
-  required_providers {
-    digitalocean = {
-      source  = "digitalocean/digitalocean"
-      version = "~> 2.0"
-    }
-  }
-}
-
-provider "digitalocean" {
-  token = var.digitalocean_token
-}
-
-variable "digitalocean_token" {
-  type        = string
-  description = "DigitalOcean API Token"
+provider "google" {
+  project = "hpcn-448319"
+  region  = "us-central1"
+  zone    = "us-central1-c"
 }
 
 variable "head_vm_hostname" {
@@ -31,67 +19,116 @@ variable "worker_count" {
   default = 4
 }
 
-variable "head_instance_size" {
+variable "head_instance" {
   type    = string
-  default = "s-2vcpu-4gb"
+  default = "e2-medium"
 }
 
-variable "worker_instance_size" {
+variable "worker_instance" {
   type    = string
-  default = "s-2vcpu-4gb"
+  default = "e2-medium"
 }
 
-variable "region" {
-  type    = string
-  default = "nyc3"
+resource "google_compute_network" "main" {
+  name                    = "hpc-network"
+  auto_create_subnetworks = false
 }
 
-resource "digitalocean_vpc" "main" {
-  name   = "hpc-vpc"
-  region = var.region
+resource "google_compute_subnetwork" "main" {
+  name          = "hpc-subnet"
+  ip_cidr_range = "10.0.1.0/24"
+  network       = google_compute_network.main.id
+  region        = "us-central1"
 }
 
-resource "digitalocean_ssh_key" "default" {
-  name       = "default-key"
-  public_key = file("~/.ssh/id_rsa.pub")
+resource "google_compute_router" "nat_router" {
+  name    = "hpc-router"
+  network = google_compute_network.main.id
+  region  = "us-central1"
 }
 
-resource "digitalocean_droplet" "head" {
-  name     = var.head_vm_hostname
-  region   = var.region
-  size     = var.head_instance_size
-  image    = "debian-12-x64"
-  vpc_uuid = digitalocean_vpc.main.id
-  ssh_keys = [digitalocean_ssh_key.default.id]
+resource "google_compute_router_nat" "nat_config" {
+  name                               = "hpc-nat"
+  router                             = google_compute_router.nat_router.name
+  region                             = "us-central1"
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+}
 
-  user_data = <<EOT
+resource "google_compute_firewall" "allow_internal" {
+  name    = "allow-internal"
+  network = google_compute_network.main.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["0-65535"]
+  }
+
+  allow {
+    protocol = "udp"
+    ports    = ["0-65535"]
+  }
+
+  allow {
+    protocol = "icmp"
+  }
+
+  source_ranges = ["10.0.1.0/24"]
+}
+
+resource "google_compute_firewall" "allow_ssh" {
+  name    = "allow-ssh"
+  network = google_compute_network.main.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+
+  source_ranges = ["0.0.0.0/0"]
+}
+
+resource "google_compute_instance" "head" {
+  name         = "head"
+  machine_type = var.head_instance
+  zone         = "us-central1-c"
+
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-12"
+    }
+  }
+
+  network_interface {
+    network    = google_compute_network.main.id
+    subnetwork = google_compute_subnetwork.main.id
+    access_config {}
+  }
+
+  metadata = {
+    ssh-keys = "hpcn:${file("~/.ssh/id_rsa.pub")}"
+  }
+
+  metadata_startup_script = <<EOT
 #!/bin/bash
-
-#Create user hpcn and add to sudo group
-useradd -m -s /bin/bash hpcn
-echo "hpcn:hpcn" | chpasswd
-usermod -aG sudo hpcn
-
 exec 3>&1 4>&2
 trap 'exec 2>&4 1>&3' 0 1 2 3
 exec 1>/home/hpcn/log.out 2>&1
 apt-get update
 apt-get install -y nfs-kernel-server libmunge-dev munge openmpi-bin openmpi-common libopenmpi-dev libdbus-1-dev
 apt-get install -y openssl libssl-dev libpam-dev numactl hwloc lua5.4 libreadline-dev rrdtool libncurses-dev man2html libibmad-dev libibumad-dev bzip2 build-essential dnsutils bc
-
 mkdir -p /nfs/mpi
 chown -R nobody:nogroup /nfs/
-chmod -R 777 /nfs
+chmod -R 777 /nfs/
 
 # Dynamically export the NFS share based on private IP
-PRIVATE_IP=$(curl -w "\n" http://169.254.169.254/metadata/v1/interfaces/private/0/ipv4/address)
-CURRENT_HOST=$(hostname)
-echo "/nfs $PRIVATE_IP/24(rw,sync,no_subtree_check,no_root_squash)" >> /etc/exports
+PRIVATE_IP=$(hostname -I | awk '{print $1}')
+echo "/nfs $PRIVATE_IP/24(rw,sync,no_subtree_check)" >> /etc/exports
 exportfs -a
 systemctl restart nfs-kernel-server
 
 # Configure Munge
-echo "welcometoslurmdouserwelcometoslurmdouserwelcometoslurmdouser" | tee /etc/munge/munge.key
+echo "welcometoslurmgcpuserwelcometoslurmgcpuserwelcometoslurmgcpuser" | tee /etc/munge/munge.key
 chown munge:munge /etc/munge/munge.key
 chmod 600 /etc/munge/munge.key
 chown -R munge /etc/munge/ /var/log/munge/
@@ -100,7 +137,7 @@ systemctl enable munge
 systemctl start munge
 sleep 15
 
-cd /home
+cd /home/hpcn
 wget -q https://download.schedmd.com/slurm/slurm-22.05-latest.tar.bz2
 tar -xvf /home/hpcn/slurm-*.tar.bz2 -C /home/hpcn
 cd /home/hpcn/slurm-*
@@ -192,12 +229,6 @@ echo 'export SLURM_HOME=/nfs/slurm' | tee /etc/profile.d/slurm.sh
 echo 'export SLURM_CONF=$SLURM_HOME/etc/slurm.conf' | tee -a /etc/profile.d/slurm.sh
 echo 'export PATH=/nfs/slurm/bin:$PATH' | tee -a /etc/profile.d/slurm.sh
 
-#Add this ip hostname pair to a hosts file in /nfs/hosts
-echo "$PRIVATE_IP $CURRENT_HOST" >> /nfs/hosts
-
-rm /etc/hosts
-ln -s /nfs/hosts /etc/hosts
-
 # Launch Slurmctld
 mkdir -p /var/spool/slurm
 'cp' /nfs/slurm/etc/slurm/slurmd.service /lib/systemd/system
@@ -208,40 +239,42 @@ systemctl start slurmctld
 touch /nfs/headnode_started
 wget https://raw.githubusercontent.com/TretornESP/HPCN-VIRTUAL-CLUSTERS/refs/heads/main/execute.sh -O /home/hpcn/exec.sh
 chmod +x /home/hpcn/exec.sh
-chmod -R 777 /nfs
 echo "Slurmctld started"
-
-source /etc/profile.d/slurm.sh
-./exec.sh
 EOT
 }
 
-resource "digitalocean_droplet" "worker" {
-  count    = var.worker_count
-  name     = "${var.worker_vm_hostname}-${count.index}"
-  region   = var.region
-  size     = var.worker_instance_size
-  image    = "debian-12-x64"
-  vpc_uuid = digitalocean_vpc.main.id
-  ssh_keys = [digitalocean_ssh_key.default.id]
+resource "google_compute_instance" "worker" {
+  count        = var.worker_count
+  name         = "${var.worker_vm_hostname}-${count.index}"
+  machine_type = var.worker_instance
+  zone         = "us-central1-c"
 
-  user_data = <<EOT
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-12"
+    }
+  }
+
+  network_interface {
+    network    = google_compute_network.main.id
+    subnetwork = google_compute_subnetwork.main.id
+  }
+
+  metadata = {
+    ssh-keys = "hpcn:${file("~/.ssh/id_rsa.pub")}"
+  }
+
+  metadata_startup_script = <<EOT
 #!/bin/bash
 exec 3>&1 4>&2
 trap 'exec 2>&4 1>&3' 0 1 2 3
 exec 1>/home/hpcn/log.out 2>&1
 apt-get update
-
-echo "Updating /etc/hosts for LAN hostname resolution"
-
-PRIVATE_IP=$(curl -w "\n" http://169.254.169.254/metadata/v1/interfaces/private/0/ipv4/address)
-CURRENT_HOST=$(hostname)
-
 apt-get install -y nfs-kernel-server libmunge-dev munge openmpi-bin openmpi-common libopenmpi-dev libdbus-1-dev
 apt-get install -y openssl libssl-dev libpam-dev numactl hwloc lua5.4 libreadline-dev rrdtool libncurses-dev man2html libibmad-dev libibumad-dev bzip2 build-essential dnsutils bc
 # Configure Munge
 mkdir -p /etc/munge
-echo "welcometoslurmdouserwelcometoslurmdouserwelcometoslurmdouser" | tee /etc/munge/munge.key
+echo "welcometoslurmgcpuserwelcometoslurmgcpuserwelcometoslurmgcpuser" | tee /etc/munge/munge.key
 chown -R munge:munge /etc/munge/munge.key
 chmod 600 /etc/munge/munge.key
 chown -R munge /etc/munge/ /var/log/munge/
@@ -252,17 +285,11 @@ sleep 180
 
 mkdir -p /nfs/reports
 # Mount the NFS share dynamically based on the head node's private IP
-mount -t nfs ${digitalocean_droplet.head.ipv4_address_private}:/nfs /nfs
+mount -t nfs ${google_compute_instance.head.network_interface.0.network_ip}:/nfs /nfs
 chown nobody:nogroup /nfs
-chmod -R 777 /nfs
-echo "${digitalocean_droplet.head.ipv4_address_private}:/nfs /nfs nfs defaults 0 0" >> /etc/fstab
+chmod 777 /nfs
+echo "${google_compute_instance.head.network_interface.0.network_ip}:/nfs /nfs nfs defaults 0 0" >> /etc/fstab
 export SLURM_HOME=/nfs/slurm
-
-#Add this ip hostname pair to a hosts file in /nfs/hosts
-echo "$PRIVATE_IP $CURRENT_HOST" >> /nfs/hosts
-
-rm /etc/hosts
-ln -s /nfs/hosts /etc/hosts
 
 #wait for headnode to start
 echo "Waiting for headnode to start..."
@@ -283,15 +310,11 @@ sed "s|@SLURM_NODENAME@|${var.worker_vm_hostname}-${count.index}|" $SLURM_HOME/e
 systemctl restart munge.service
 systemctl enable slurmd.service
 systemctl start slurmd.service
-chmod -R 777 /nfs
+
 echo "Slurmd started"
 EOT
 }
 
-output "head_public_ip" {
-  value = digitalocean_droplet.head.ipv4_address
-}
-
-output "worker_private_ips" {
-  value = [for worker in digitalocean_droplet.worker : worker.ipv4_address_private]
+output "head_public_ip_address" {
+  value = google_compute_instance.head.network_interface.0.access_config.0.nat_ip
 }
